@@ -54,10 +54,9 @@ func responseStringer(result interface{}, err error) (stringified []string) {
 
 func getAndMatch(uri string, pattern *regexp.Regexp) chan string {
 	// TODO: Read in the value of n
-	n := uint32(10)
+	retries := uint32(10)
 
-	// Retry n times
-	getter := expb.NewUrlGetter(uri, n)
+	getter := expb.NewUrlGetter(uri, retries)
 
 	matchesChan := make(chan string)
 

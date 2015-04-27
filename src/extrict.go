@@ -1,5 +1,7 @@
 package extrict
 
+import "regexp"
+
 const (
 	HttpPattern = `(https?://[^"]+\.[\w\d]+)`
 )
@@ -22,5 +24,6 @@ func crawl(uri string, pattern *regexp.Regexp, depth uint32, saveChan chan strin
 	}
 
 	producerChan := getAndMatch(uri, pattern)
+
 	unloadStringChan(producerChan, saveChan)
 }
