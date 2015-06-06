@@ -14,6 +14,15 @@ type consumer func(string) string
 type producer func(uri string, pattern *regexp.Regexp) chan string
 type regexper func(string) *regexp.Regexp
 
+var (
+	uriRegCompile = regexer(HttpPattern)
+)
+
+type uriMatchChanPair struct {
+	uriChan     chan string
+	matchesChan chan string
+}
+
 func regexpGenerator() regexper {
 	cache := map[string]*regexp.Regexp{}
 
@@ -40,7 +49,7 @@ func responseStringer(result interface{}, err error) (stringified []string) {
 	defer resp.Body.Close()
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		fmt.Println(err)
+		fmt.Println("err", err)
 		return
 	}
 
@@ -52,32 +61,56 @@ func responseStringer(result interface{}, err error) (stringified []string) {
 	return stringified
 }
 
-func getAndMatch(uri string, pattern *regexp.Regexp) chan string {
-	// TODO: Read in the value of n
-	retries := uint32(10)
-
-	getter := expb.NewUrlGetter(uri, retries)
-
+func extractAndMatch(lines []string, pattern *regexp.Regexp) chan string {
 	matchesChan := make(chan string)
-
 	go func() {
-		expb.ExponentialBackOff(getter, func(resp interface{}, err error) {
-			lines := responseStringer(resp, err)
-			for _, line := range lines {
-				if len(line) < 1 {
+		defer close(matchesChan)
+
+		for _, line := range lines {
+			if len(line) < 1 {
+				continue
+			}
+
+			matches := pattern.FindAllString(line, -1)
+
+			mappings := make(map[string]bool)
+
+			for _, match := range matches {
+				_, ok := mappings[match]
+				if ok {
 					continue
 				}
 
-				matches := pattern.FindAllString(line, -1)
-				for _, match := range matches {
-					matchesChan <- match
-				}
+				matchesChan <- match
+				mappings[match] = true
 			}
-			close(matchesChan)
-		})
+		}
 	}()
 
 	return matchesChan
+}
+
+func getAndMatch(uri string, pattern *regexp.Regexp) chan *uriMatchChanPair {
+	// TODO: Read in the value of n
+	retries := uint32(3)
+
+	getter := expb.NewUrlGetter(uri, retries)
+	chanOPair := make(chan *uriMatchChanPair)
+
+	go func() {
+		expb.ExponentialBackOff(getter, func(resp interface{}, err error) {
+			defer close(chanOPair)
+
+			lines := responseStringer(resp, err)
+
+			matchesChan := extractAndMatch(lines, pattern)
+			uriChan := extractAndMatch(lines, uriRegCompile)
+
+			chanOPair <- &uriMatchChanPair{uriChan: uriChan, matchesChan: matchesChan}
+		})
+	}()
+
+	return chanOPair
 }
 
 func unloadStringChan(from chan string, to chan string) {

@@ -1,29 +1,68 @@
 package extrict
 
-import "regexp"
-
-const (
-	HttpPattern = `(https?://[^"]+\.[\w\d]+)`
+import (
+	"fmt"
+	"regexp"
 )
 
+const (
+	HttpPattern = "(https?://[\\w\\d\\./]+)(\\w+|\\.c[ao]m?|gov)"
+)
+
+func ExtensionToUrlApplication(ext string) string {
+	return fmt.Sprintf("(https?://[^\"()=]+)\\.(%s)", ext)
+}
+
 func GetAndMatch(uri string, pattern string) chan string {
-	return getAndMatch(uri, regexer(pattern))
+	return crawl(uri, regexer(pattern), 1)
 }
 
 func GetAndMatchHttpLinks(uri string) chan string {
 	return GetAndMatch(uri, HttpPattern)
 }
 
-func crawl(uri string, pattern *regexp.Regexp, depth uint32, saveChan chan string) {
-	// Incomplete
+func CrawlAndMatchByExtension(uri, extRegStr string, depth int32) chan string {
+	return crawl(uri, regexer(ExtensionToUrlApplication(extRegStr)), depth)
+}
+
+func crawl(uri string, pattern *regexp.Regexp, depth int32) (saveChan chan string) {
+	saveChan = make(chan string)
+
 	if depth == 0 {
-		return
-	}
-	if depth >= 1 {
-		depth -= 1
+		close(saveChan)
+		return saveChan
 	}
 
-	producerChan := getAndMatch(uri, pattern)
+	go func() {
+		defer close(saveChan)
 
-	unloadStringChan(producerChan, saveChan)
+		if depth >= 1 {
+			depth -= 1
+		}
+
+		kPair := <-getAndMatch(uri, pattern)
+		uris, matchesChan := kPair.uriChan, kPair.matchesChan
+
+		done := make(chan chan string)
+		doneCount := uint(0)
+
+		unloadStringChan(matchesChan, saveChan)
+
+		for subUri := range uris {
+			doneCount += 1
+			go func(u string) {
+				// fmt.Println("subUri", u, pattern)
+				subCrawl := crawl(u, pattern, depth)
+				done <- subCrawl
+			}(subUri)
+		}
+
+		for i := uint(0); i < doneCount; i += 1 {
+			subCrawl := <-done
+			unloadStringChan(subCrawl, saveChan)
+		}
+	}()
+
+	return
+
 }
