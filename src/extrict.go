@@ -40,6 +40,8 @@ func crawl(uri string, pattern *regexp.Regexp, depth int32) (saveChan chan strin
 			depth -= 1
 		}
 
+		visited := make(map[string]bool)
+
 		kPair := <-getAndMatch(uri, pattern)
 		uris, matchesChan := kPair.uriChan, kPair.matchesChan
 
@@ -50,6 +52,12 @@ func crawl(uri string, pattern *regexp.Regexp, depth int32) (saveChan chan strin
 
 		for subUri := range uris {
 			doneCount += 1
+			if _, ok := visited[subUri]; ok {
+				return
+			}
+
+			visited[subUri] = true
+
 			go func(u string) {
 				// fmt.Println("subUri", u, pattern)
 				subCrawl := crawl(u, pattern, depth)
